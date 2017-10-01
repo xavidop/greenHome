@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:quartz="http://www.mulesoft.org/schema/mule/quartz"
+	xmlns:slack="http://www.mulesoft.org/schema/mule/slack" xmlns:pop3s="http://www.mulesoft.org/schema/mule/pop3s"
+	xmlns:imaps="http://www.mulesoft.org/schema/mule/imaps" xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/slack http://www.mulesoft.org/schema/mule/slack/current/mule-slack.xsd
+http://www.mulesoft.org/schema/mule/pop3s http://www.mulesoft.org/schema/mule/pop3s/current/mule-pop3s.xsd
+http://www.mulesoft.org/schema/mule/imaps http://www.mulesoft.org/schema/mule/imaps/current/mule-imaps.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/quartz http://www.mulesoft.org/schema/mule/quartz/current/mule-quartz.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+
+
+	<imaps:connector name="IMAP" doc:name="IMAPConf"
+		validateConnections="true">
+		<imaps:tls-client path="*" storePassword="*" />
+		<imaps:tls-trust-store path="*" storePassword="*" />
+	</imaps:connector>
+
+
+	<pop3s:connector name="pop3sConnector" checkFrequency="100"
+		doc:name="POP3" validateConnections="true" dynamicNotification="true">
+		<pop3s:tls-client path="*" storePassword="*" />
+		<pop3s:tls-trust-store path="*" storePassword="*" />
+	</pop3s:connector>
+	<slack:token-config name="Slack__Token_Configuration"
+		accessToken=""
+		doc:name="Slack: Token Configuration" />
+    <http:listener-config name="HTTP_Listener_Configuration" host="0.0.0.0" port="7898" doc:name="HTTP Listener Configuration"/>
+
+	<flow name="green-home-data-consumerFlow">
+		<pop3s:inbound-endpoint 
+			doc:name="POP3" host="pop.gmail.com" password="greenhome01" port="995"
+			responseTimeout="1000" user="greenhomealerts%40gmail.com" />
+		<expression-transformer expression="#[payload]"
+			doc:name="Expression" />
+		<logger
+			message=" SUBJECT: #[message.inboundProperties.subject] FROM: #[message.inboundProperties.fromAddress]"
+			level="ERROR" doc:name="Logger" />
+		<set-payload value="#[payload]" doc:name="Set Payload" />
+        <component class="com.greenhome.kafka.KafkaUtils" doc:name="sendToKafka"/>
+		<!-- <logger message="BODY1: #[payload]" level="ERROR" doc:name="Logger" 
+			/> -->
+		<slack:post-message config-ref="Slack__Token_Configuration"
+			channelId="C7C6TKA15"
+			iconURL="https://www.green-living.com.sg/RXSG/RXSG_Green-Living/2016-v2/images/home/CitiesOfLove_GreenHomeIcon.png?v=636027850060390284"
+			username="Green Home Alert" message="#[payload]" doc:name="Slack" />
+	</flow>
+	<flow name="green-home-data-consumerDataDownloader">
+		<quartz:inbound-endpoint jobName="downloadFromIotSens"
+			repeatInterval="15000" responseTimeout="10000" doc:name="Quartz">
+			<quartz:event-generator-job/>
+		</quartz:inbound-endpoint>
+        <component class="com.greenhome.consumer.DataConsumer" doc:name="GetAllData"/>
+        <component class="com.greenhome.kafka.KafkaUtils" doc:name="sendToKafka"/>
+        <slack:post-message config-ref="Slack__Token_Configuration" channelId="C7C7P7NHL" iconURL="https://www.green-living.com.sg/RXSG/RXSG_Green-Living/2016-v2/images/home/CitiesOfLove_GreenHomeIcon.png?v=636027850060390284" username="Green Home Alert" message="#[payload]" doc:name="Slack"/>
+	</flow>
+    <flow name="green-home-data-consumerFlow1">
+        <http:listener config-ref="HTTP_Listener_Configuration" path="/sendMQTT"  doc:name="HTTP"/>
+        <set-payload value="#[json:data]" doc:name="Set Payload"/>
+        <component class="com.greenhome.mqtt.MQTTSender" doc:name="Java"/>
+    </flow>
+</mule>
